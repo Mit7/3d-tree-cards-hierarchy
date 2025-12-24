@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Tree Branching View</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        /* --- CARD STYLING --- */
+        .card {
+            width: 180px;
+            height: 240px;
+            background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 1px solid #999;
+        }
+
+        .card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 25px #00d2ff;
+            border-color: #00d2ff;
+        }
+
+        .photo {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #333;
+            margin-bottom: 15px;
+            background: #ddd;
+        }
+
+        .name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .role {
+            font-size: 0.85rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* --- CONNECTOR LINES --- */
+        /* We use a thin div to act as a line */
+        .connector {
+            background-color: #666;
+            height: 2px;
+            position: absolute;
+            transform-origin: 0 50%; /* Rotate from the start point */
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        #container { width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+
+    <div id="container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. CONFIGURATION ---
+        const config = {
+            cardWidth: 200,   // Horizontal spacing
+            cardHeight: 300,  // Vertical spacing between levels
+        };
+
+        // --- 2. HIERARCHICAL DATA (The Tree) ---
+        const treeData = {
+            name: "CEO", role: "Director",
+            children: [
+                {
+                    name: "VP Eng", role: "Engineering",
+                    children: [
+                        { name: "Team Lead", role: "Backend", children: [] },
+                        { name: "Team Lead", role: "Frontend", children: [
+                            { name: "Dev 1", role: "React", children: [] },
+                            { name: "Dev 2", role: "ThreeJS", children: [] }
+                        ]}
+                    ]
+                },
+                {
+                    name: "VP Design", role: "Product",
+                    children: [
+                        { name: "Lead UX", role: "Research", children: [] },
+                        { name: "Lead UI", role: "Visual", children: [
+                             { name: "Intern", role: "Graphics", children: [] }
+                        ]}
+                    ]
+                }
+            ]
+        };
+
+        // --- 3. SCENE SETUP ---
+        const container = document.getElementById('container');
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(0, -200, 2000); // Start looking at the center
+
+        const renderer = new CSS3DRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- 4. TREE LAYOUT ALGORITHM ---
+        
+        // A. Assign layout properties (X and Y coordinates)
+        // We use a simple logic: Leaves are placed sequentially. Parents are centered over children.
+        let currentLeafX = 0;
+
+        function calculateLayout(node, level) {
+            // 1. Process Children first (Post-order traversal)
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => calculateLayout(child, level + 1));
+                
+                // 2. Place Parent: Average X of first and last child
+                const firstChild = node.children[0];
+                const lastChild = node.children[node.children.length - 1];
+                node.x = (firstChild.x + lastChild.x) / 2;
+            } else {
+                // 3. If Leaf: Place at next available slot
+                node.x = currentLeafX;
+                currentLeafX += config.cardWidth;
+            }
+
+            node.y = -level * config.cardHeight; // Going down in Y
+            node.level = level;
+            return node;
+        }
+
+        // B. Center the whole tree at x=0
+        function centerTree(rootNode) {
+            // Find bounds
+            let minX = Infinity, maxX = -Infinity;
+            function traverse(n) {
+                if(n.x < minX) minX = n.x;
+                if(n.x > maxX) maxX = n.x;
+                if(n.children) n.children.forEach(traverse);
+            }
+            traverse(rootNode);
+            
+            const midPoint = (minX + maxX) / 2;
+            
+            // Shift everyone
+            function shift(n) {
+                n.x -= midPoint;
+                if(n.children) n.children.forEach(shift);
+            }
+            shift(rootNode);
+        }
+
+        // Execute Layout
+        calculateLayout(treeData, 0);
+        centerTree(treeData);
+
+
+        // --- 5. RENDER FUNCTIONS ---
+
+        function createCard(node) {
+            const div = document.createElement('div');
+            div.className = 'card';
+            // Generating a random avatar based on name
+            const imgUrl = `https://ui-avatars.com/api/?name=${node.name}&background=random&size=128`;
+            
+            div.innerHTML = `
+                <img src="${imgUrl}" class="photo">
+                <div class="name">${node.name}</div>
+                <div class="role">${node.role}</div>
+            `;
+
+            const object = new CSS3DObject(div);
+            object.position.set(node.x, node.y, 0);
+            scene.add(object);
+        }
+
+        function createConnector(x1, y1, x2, y2) {
+            // Calculate length and angle between two points
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const angle = Math.atan2(dy, dx); // Radians
+
+            const div = document.createElement('div');
+            div.className = 'connector';
+            div.style.width = `${length}px`;
+            
+            const object = new CSS3DObject(div);
+            // Position is at the starting point (x1, y1)
+            object.position.set(x1, y1, -10); // Slightly behind cards (z = -10)
+            
+            // CSS3D rotation uses standard Euler angles
+            // We rotate Z axis to angle the line
+            object.rotation.z = angle;
+
+            // Correction: Three.js positions object at its center. 
+            // Our math assumes top-left origin for rotation.
+            // We must offset the center position.
+            // Actually, simplest way in CSS3D is to place center at midpoint:
+            object.position.set((x1 + x2)/2, (y1 + y2)/2, -10);
+            
+            scene.add(object);
+        }
+
+        // Recursive render loop
+        function renderTree(node) {
+            // Draw self
+            createCard(node);
+
+            // Draw connections to children
+            if (node.children) {
+                node.children.forEach(child => {
+                    // Draw Line
+                    // Start: Bottom of parent
+                    // End: Top of child
+                    // Adjust offsets based on card height (approx 240px tall)
+                    const parentBottomY = node.y - 120; 
+                    const childTopY = child.y + 120;
+                    
+                    // Simple straight line
+                    createConnector(node.x, parentBottomY, child.x, childTopY);
+
+                    // Recurse
+                    renderTree(child);
+                });
+            }
+        }
+
+        // Run Rendering
+        renderTree(treeData);
+
+
+        // --- 6. ANIMATION & RESIZE ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>

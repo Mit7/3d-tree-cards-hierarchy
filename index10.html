@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Pyramid Tree View</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a; /* Dark background */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* This is the styling for the SINGLE CARD.
+           It acts just like a normal HTML div but will live in 3D space.
+        */
+        .card {
+            width: 200px;
+            height: 260px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5); /* Glowing effect */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            user-select: none; /* Prevents text selection while dragging */
+            transition: transform 0.3s;
+            backface-visibility: hidden; /* Hides back of card */
+        }
+
+        .card:hover {
+            box-shadow: 0 0 40px rgba(0, 255, 255, 0.8);
+            border: 2px solid #00ffff;
+        }
+
+        .photo {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid #333;
+            margin-bottom: 20px;
+        }
+
+        .name {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .role {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        /* Container for the 3D Scene */
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONFIGURATION ---
+        const config = {
+            cardWidth: 220, // Width + gap
+            cardHeight: 300, // Height + gap
+            levels: 5 // How tall is the pyramid
+        };
+
+        // --- MOCK DATA GENERATOR ---
+        // Generates a list of users to fill the pyramid
+        const users = [];
+        let count = 0;
+        for (let i = 0; i < config.levels; i++) {
+            for (let j = 0; j <= i; j++) {
+                count++;
+                users.push({
+                    name: `User ${count}`,
+                    role: 'Member',
+                    // Using UI Avatars for placeholder images
+                    photo: `https://ui-avatars.com/api/?name=User+${count}&background=random&color=fff&size=200`
+                });
+            }
+        }
+
+        // --- SCENE SETUP ---
+        const container = document.getElementById('container');
+        
+        // 1. Scene
+        const scene = new THREE.Scene();
+
+        // 2. Camera
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 5000);
+        camera.position.set(0, 0, 1500); // Pull camera back to see the tree
+
+        // 3. Renderer (CSS3D for HTML elements)
+        const renderer = new CSS3DRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // 4. Controls (Mouse interaction)
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; // Smooth animation
+        controls.dampingFactor = 0.05;
+
+        // --- PYRAMID BUILDER FUNCTION ---
+        function createPyramid() {
+            let userIndex = 0;
+
+            // Loop through levels (Rows)
+            for (let row = 0; row < config.levels; row++) {
+                
+                // Number of cards in this row increases by 1 each level
+                const cardsInRow = row + 1; 
+
+                // Loop through items in the row
+                for (let col = 0; col < cardsInRow; col++) {
+                    
+                    if(userIndex >= users.length) break;
+
+                    const userData = users[userIndex];
+                    
+                    // A. Create HTML Element
+                    const div = document.createElement('div');
+                    div.className = 'card';
+                    div.innerHTML = `
+                        <img src="${userData.photo}" class="photo" alt="profile">
+                        <div class="name">${userData.name}</div>
+                        <div class="role">${userData.role}</div>
+                    `;
+
+                    // B. Convert to 3D Object
+                    const object = new CSS3DObject(div);
+
+                    // C. Calculate Position (The Math)
+                    // X: Center the row. Formula: (colIndex - (totalInRow-1)/2) * spacing
+                    const x = (col - (cardsInRow - 1) / 2) * config.cardWidth;
+                    
+                    // Y: Stack downwards from top. 
+                    // We start at a positive Y and subtract per row.
+                    const startY = (config.levels * config.cardHeight) / 2; 
+                    const y = startY - (row * config.cardHeight);
+
+                    // Z: 0 for flat pyramid
+                    const z = 0;
+
+                    object.position.set(x, y, z);
+                    scene.add(object);
+
+                    userIndex++;
+                }
+            }
+        }
+
+        createPyramid();
+
+        // --- RESPONSIVE LOGIC ---
+        window.addEventListener('resize', onWindowResize);
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            
+            // Optional: Adjust camera distance based on screen width for mobile
+            // If screen is narrow, pull camera back
+            if(window.innerWidth < 600) {
+                camera.position.z = 2500;
+            } else {
+                camera.position.z = 1500;
+            }
+        }
+        
+        // Initial check for mobile
+        onWindowResize();
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>

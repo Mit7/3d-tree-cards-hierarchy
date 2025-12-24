@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Holi 3D Tree Hierarchy</title>
+    <style>
+        body { 
+            margin: 0; 
+            background-color: #2a0a3a; 
+            font-family: 'Segoe UI', sans-serif;
+            overflow: hidden; /* No native scrollbars, we use 3D Pan/Zoom */
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            outline: none;
+            background: radial-gradient(circle at 50% 30%, transparent 0%, rgba(0,0,0,0.4) 100%);
+        }
+
+        /* HUD Controls */
+        #ui-layer {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 10px 20px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            display: flex;
+            gap: 20px;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .instruction {
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .icon { font-size: 18px; }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    
+    <div id="ui-layer">
+        <div class="instruction"><span class="icon">🖱️</span> Right Click (or Two Finger) to Pan</div>
+        <div class="instruction"><span class="icon">🔍</span> Scroll to Zoom</div>
+        <div class="instruction"><span class="icon">👆</span> Left Click to Rotate</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONFIGURATION ---
+        const config = {
+            cardWidth: 20,
+            cardHeight: 28,
+            cardDepth: 1.5,
+            verticalGap: 40, // Distance between parent and child
+            horizontalGap: 25, // Distance between siblings
+            bgColor: 0x2a0a3a,
+            fogColor: 0x4a1a5a
+        };
+
+        // --- 1. DATA GENERATION (Simulating a complex tree) ---
+        // In a real app, you would fetch this JSON from your database.
+        function generateRandomTree(depth, maxChildren) {
+            let idCounter = 0;
+            
+            function createNode(currentDepth) {
+                idCounter++;
+                const node = {
+                    id: idCounter,
+                    name: `Member ${idCounter}`,
+                    role: currentDepth === 0 ? "Head of Family" : "Member",
+                    children: [],
+                    // Visual properties calculate later
+                    width: 0, 
+                    x: 0, 
+                    y: 0 
+                };
+
+                if (currentDepth < depth) {
+                    const numChildren = Math.floor(Math.random() * maxChildren); // 0 to maxChildren
+                    for (let i = 0; i < numChildren; i++) {
+                        // 80% chance to continue the branch
+                        if(Math.random() > 0.1) {
+                            node.children.push(createNode(currentDepth + 1));
+                        }
+                    }
+                }
+                return node;
+            }
+
+            // Create multiple "Roots" (e.g., 3 main families)
+            const roots = [];
+            for(let i=0; i<3; i++) {
+                roots.push(createNode(0));
+            }
+            return roots;
+        }
+
+        // Generate data: 5 levels deep, up to 4 children per node
+        const treeData = generateRandomTree(5, 4);
+
+        // --- 2. LAYOUT ALGORITHM ---
+        // We need to calculate X positions so nodes don't overlap.
+        
+        // Step A: Calculate the total width of each subtree
+        function calculateSubtreeWidth(node) {
+            if (node.children.length === 0) {
+                node.width = config.cardWidth;
+                return node.width;
+            }
+            
+            let totalWidth = 0;
+            node.children.forEach(child => {
+                totalWidth += calculateSubtreeWidth(child);
+            });
+            
+            // Add spacing between children
+            totalWidth += (node.children.length - 1) * config.horizontalGap;
+            
+            // The node's width is at least the card width, or the children's width
+            node.width = Math.max(config.cardWidth, totalWidth);
+            return node.width;
+        }
+
+        // Step B: Assign X/Y positions recursively
+        function assignPositions(node, x, y) {
+            node.x = x;
+            node.y = y;
+
+            if (node.children.length > 0) {
+                let startX = x - node.width / 2;
+                
+                node.children.forEach(child => {
+                    // Place child centered within its own allocated width
+                    const childX = startX + child.width / 2;
+                    assignPositions(child, childX, y - config.verticalGap);
+                    startX += child.width + config.horizontalGap;
+                });
+            }
+        }
+
+        // Run Layout for all roots
+        let totalSceneWidth = 0;
+        treeData.forEach(root => {
+            calculateSubtreeWidth(root);
+            // Position roots next to each other
+            assignPositions(root, totalSceneWidth, 0); 
+            totalSceneWidth += root.width + (config.horizontalGap * 2);
+        });
+        // Center the whole group
+        const xOffset = totalSceneWidth / 2;
+
+
+        // --- SCENE SETUP ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(config.bgColor);
+        scene.fog = new THREE.Fog(config.fogColor, 100, 1000);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.set(0, 50, 200);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff0dd, 1.2);
+        dirLight.position.set(50, 100, 100);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 4096; // High res shadows for large map
+        dirLight.shadow.mapSize.height = 4096;
+        const d = 500; // Large shadow area
+        dirLight.shadow.camera.left = -d; dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d; dirLight.shadow.camera.bottom = -d;
+        scene.add(dirLight);
+        
+        const rimLight = new THREE.DirectionalLight(0x00ffff, 1.5);
+        rimLight.position.set(-50, 50, -100);
+        scene.add(rimLight);
+
+        // --- TEXTURE GEN ---
+        function createCardTexture(id, role, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 358; // Smaller texture for performance
+            const ctx = canvas.getContext('2d');
+            
+            // Bg
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,256,358);
+            ctx.fillStyle = color; ctx.fillRect(0,0,256,15); // Top bar
+
+            // Photo
+            const cx = 128; const cy = 110; 
+            ctx.beginPath(); ctx.arc(cx, cy, 60, 0, Math.PI*2);
+            ctx.fillStyle = '#ddd'; ctx.fill();
+            ctx.lineWidth = 6; ctx.strokeStyle = color; ctx.stroke();
+            
+            // Text
+            ctx.fillStyle = '#333'; ctx.font = 'bold 24px Arial'; ctx.textAlign = 'center';
+            ctx.fillText(`Guest ${id}`, cx, 220);
+            ctx.fillStyle = '#666'; ctx.font = 'italic 18px Arial';
+            ctx.fillText(role, cx, 250);
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // --- BUILDER ---
+        const geometry = new THREE.BoxGeometry(config.cardWidth, config.cardHeight, config.cardDepth);
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 2 });
+        const sideMaterial = new THREE.MeshStandardMaterial({ color: 0xeeeeee });
+        
+        const treeGroup = new THREE.Group();
+        scene.add(treeGroup);
+
+        const cards = [];
+
+        function buildVisuals(node) {
+            // 1. Create Card
+            const hue = (node.id * 30) % 360;
+            const color = `hsl(${hue}, 70%, 50%)`;
+            const texture = createCardTexture(node.id, node.role, color);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            
+            const faceMat = new THREE.MeshStandardMaterial({ map: texture });
+            const materials = [sideMaterial, sideMaterial, sideMaterial, sideMaterial, faceMat, sideMaterial];
+            
+            const mesh = new THREE.Mesh(geometry, materials);
+            // Apply Offset to center the whole tree
+            mesh.position.set(node.x - xOffset, node.y, 0);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData = { originalY: node.y, id: node.id };
+            
+            treeGroup.add(mesh);
+            cards.push(mesh);
+
+            // 2. Create Connections (Branches)
+            if (node.children.length > 0) {
+                node.children.forEach(child => {
+                    // Line points
+                    const start = new THREE.Vector3(node.x - xOffset, node.y - (config.cardHeight/2), 0);
+                    const end = new THREE.Vector3(child.x - xOffset, child.y + (config.cardHeight/2), 0);
+                    
+                    // Create a nice curved line or straight line
+                    // For performance, let's use simple lines
+                    const points = [];
+                    points.push(start);
+                    // Add an "elbow" point for cleaner look? Or straight. Let's do straight for now.
+                    points.push(end);
+                    
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(lineGeo, lineMaterial);
+                    treeGroup.add(line);
+
+                    // Recurse
+                    buildVisuals(child);
+                });
+            }
+        }
+
+        // Build all roots
+        treeData.forEach(root => buildVisuals(root));
+
+
+        // --- CONTROLS (Google Maps Style) ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        // KEY SETTINGS FOR PAN/SCROLL
+        controls.screenSpacePanning = true; // True = Pan moves Up/Down/Left/Right. False = Pan moves forward/back.
+        controls.enableRotate = true; // Allow rotation? Yes, but maybe limit it.
+        controls.maxPolarAngle = Math.PI / 2; // Don't go below ground
+        
+        // --- PARTICLES (Holi Vibe) ---
+        function createParticles() {
+            const count = 2000;
+            const pos = new Float32Array(count * 3);
+            const col = new Float32Array(count * 3);
+            const palette = [[1,0,0], [0,1,0], [0,0,1], [1,1,0], [1,0,1]];
+            
+            for(let i=0; i<count; i++) {
+                pos[i*3] = (Math.random()-0.5) * 800;
+                pos[i*3+1] = (Math.random()-0.5) * 600;
+                pos[i*3+2] = (Math.random()-0.5) * 400;
+                const c = palette[Math.floor(Math.random()*palette.length)];
+                col[i*3] = c[0]; col[i*3+1] = c[1]; col[i*3+2] = c[2];
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+            const mat = new THREE.PointsMaterial({ size: 4, vertexColors: true, transparent: true, opacity: 0.8 });
+            const sys = new THREE.Points(geo, mat);
+            scene.add(sys);
+            return sys;
+        }
+        const particles = createParticles();
+
+        // --- INTERACTION ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let hovered = null;
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        // --- ANIMATION ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            
+            if(particles) particles.rotation.y += 0.001;
+
+            // Hover Logic
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cards);
+            
+            if(intersects.length > 0) {
+                const obj = intersects[0].object;
+                if(hovered !== obj) {
+                    if(hovered) hovered.position.z = 0;
+                    hovered = obj;
+                }
+                obj.position.z = 10; // Pop out
+            } else {
+                if(hovered) {
+                    hovered.position.z = 0;
+                    hovered = null;
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>

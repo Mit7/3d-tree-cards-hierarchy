@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bright Scrollable 3D Pyramid</title>
+    <style>
+        body { 
+            margin: 0; 
+            background-color: #f0f0f0; 
+            font-family: sans-serif;
+            /* Hide the native scrollbar track but keep functionality if desired, 
+               or style it. Here we keep default browser scrolling. */
+        }
+        
+        /* The 3D Canvas stays stuck to the screen while we scroll the invisible body */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            z-index: 1;
+            outline: none;
+        }
+
+        /* This div will give the page "height" so the scrollbar appears */
+        #scroll-height-proxy {
+            position: absolute;
+            top: 0;
+            width: 1px;
+            z-index: 0;
+            /* Height is set via JS */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="scroll-height-proxy"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONFIGURATION ---
+        const config = {
+            cardWidth: 20,
+            cardHeight: 28,
+            cardDepth: 1.5,
+            gapX: 4,
+            gapY: 4,
+            totalCards: 200, // We will calculate levels automatically based on this
+            baseColor: 0xffffff
+        };
+
+        // --- CALCULATE PYRAMID LEVELS ---
+        // We need to know how many rows to make 200 cards.
+        // Sum of integers formula: n(n+1)/2 = Total
+        // Roughly: levels ≈ sqrt(2 * totalCards)
+        let levels = 0;
+        let sum = 0;
+        while(sum < config.totalCards) {
+            levels++;
+            sum += levels;
+        }
+        
+        // --- SCENE SETUP ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xdddddd); // Light grey background
+        // Add subtle fog to blend distant cards
+        scene.fog = new THREE.Fog(0xdddddd, 100, 500);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // Initial Camera Position (Looking at the top)
+        camera.position.set(0, 0, 150);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Soft shadows
+        container.appendChild(renderer.domElement);
+
+        // --- LIGHTING (BRIGHT STUDIO SETUP) ---
+        
+        // 1. Hemisphere Light (Sky vs Ground reflection) - Great for overall visibility
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+        hemiLight.position.set(0, 200, 0);
+        scene.add(hemiLight);
+
+        // 2. Main Directional Light (The "Sun") - Creates the shadows and definition
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(50, 100, 100);
+        dirLight.castShadow = true;
+        
+        // Optimize shadow quality
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 500;
+        // Make sure shadow covers the whole pyramid width
+        const d = 100;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        
+        scene.add(dirLight);
+
+        // 3. Fill Light (Softens harsh shadows from the front)
+        const fillLight = new THREE.DirectionalLight(0xebf4fa, 0.5);
+        fillLight.position.set(-20, 0, 50);
+        scene.add(fillLight);
+
+
+        // --- TEXTURE GENERATOR ---
+        function createCardTexture(index, role, accentColor) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 716;
+            const ctx = canvas.getContext('2d');
+
+            // White Background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Header Color
+            ctx.fillStyle = accentColor;
+            ctx.fillRect(0, 0, canvas.width, 20); // Thin top bar
+
+            // Photo Placeholder
+            const centerX = canvas.width / 2;
+            const centerY = 220;
+            const radius = 130;
+            
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#eee';
+            ctx.fill();
+            // Optional: Draw an "image" inside or a letter
+            ctx.fillStyle = '#ccc';
+            ctx.font = 'bold 120px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(String(index).substring(0,2), centerX, centerY);
+
+            // Border for photo
+            ctx.lineWidth = 15;
+            ctx.strokeStyle = accentColor;
+            ctx.stroke();
+
+            // Name
+            ctx.fillStyle = '#222';
+            ctx.font = 'bold 50px "Segoe UI", Arial';
+            ctx.fillText(`Member ${index}`, centerX, 450);
+
+            // Role
+            ctx.fillStyle = '#666';
+            ctx.font = 'italic 35px "Segoe UI", Arial';
+            ctx.fillText(role, centerX, 510);
+            
+            // ID Badge
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(100, 580, 312, 60);
+            ctx.fillStyle = '#888';
+            ctx.font = '24px monospace';
+            ctx.fillText(`ID: 8439-${index}`, centerX, 618);
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // --- BUILD PYRAMID ---
+        const geometry = new THREE.BoxGeometry(config.cardWidth, config.cardHeight, config.cardDepth);
+        const pyramidGroup = new THREE.Group();
+        scene.add(pyramidGroup);
+
+        // Shared material for sides to save memory
+        const sideMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xffffff, 
+            roughness: 0.5 
+        });
+
+        let cardCount = 0;
+        const cards = [];
+
+        // Pyramid generation
+        for (let row = 0; row < levels; row++) {
+            const cardsInRow = row + 1;
+            
+            for (let col = 0; col < cardsInRow; col++) {
+                if (cardCount >= config.totalCards) break;
+                cardCount++;
+
+                // Random accent color
+                const hue = Math.floor(Math.random() * 360);
+                const color = `hsl(${hue}, 60%, 50%)`;
+                
+                const texture = createCardTexture(cardCount, "Developer", color);
+                texture.colorSpace = THREE.SRGBColorSpace;
+
+                const faceMaterial = new THREE.MeshStandardMaterial({ 
+                    map: texture, 
+                    roughness: 0.3 
+                });
+
+                const materials = [
+                    sideMaterial, sideMaterial, sideMaterial, sideMaterial,
+                    faceMaterial, sideMaterial
+                ];
+
+                const mesh = new THREE.Mesh(geometry, materials);
+
+                // Position Calculation
+                const spacingX = config.cardWidth + config.gapX;
+                const spacingY = config.cardHeight + config.gapY;
+                
+                const x = (col - (cardsInRow - 1) / 2) * spacingX;
+                // Important: Stack negative Y so row 0 is at top (0), row 1 is below (-y)
+                const y = -(row * spacingY); 
+                const z = 0;
+
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                
+                // Store for interaction
+                mesh.userData = { 
+                    id: cardCount, 
+                    basePosition: new THREE.Vector3(x,y,z) 
+                };
+
+                pyramidGroup.add(mesh);
+                cards.push(mesh);
+            }
+        }
+
+        // --- SCROLL LOGIC ---
+        
+        // 1. Calculate how tall the 3D scene is physically
+        const pyramidPhysicalHeight = levels * (config.cardHeight + config.gapY);
+        
+        // 2. Map that to pixels for the browser scrollbar
+        // 1 unit in 3D != 1 pixel in HTML. Let's say 10 pixels scroll = 1 unit 3D
+        const scrollFactor = 5; 
+        const pageHeight = pyramidPhysicalHeight * scrollFactor + window.innerHeight;
+        
+        // 3. Set the proxy height
+        document.getElementById('scroll-height-proxy').style.height = `${pageHeight}px`;
+
+        // 4. Setup Controls (Restricted OrbitControls)
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableZoom = true; // Allow zoom with wheel? 
+        // We need to disable Zoom on wheel because we want wheel to Scroll.
+        controls.enableZoom = false; 
+        controls.enablePan = false; 
+        controls.enableRotate = true; // User can still look around a bit
+        controls.dampingFactor = 0.05;
+        controls.enableDamping = true;
+
+        // Camera Offset logic
+        // We want the camera to be slightly above the target
+        const cameraZOffset = 120;
+        const cameraYOffset = 10; 
+
+        function updateCameraScroll() {
+            // Get scroll percentage (0 to 1) or pure pixel value
+            const scrollY = window.scrollY;
+            
+            // Convert pixels to 3D units
+            // We start at Y=0 and go down to Y = -pyramidPhysicalHeight
+            const targetY = -(scrollY / scrollFactor);
+
+            // Move the camera and the controls target smoothly
+            // We use simple lerp here, or just direct set since native scroll is smooth enough usually
+            
+            camera.position.y = targetY + cameraYOffset;
+            controls.target.y = targetY;
+            controls.target.x = 0; // Keep centered horizontally
+        }
+
+        // --- MOUSE INTERACTION (Tilt Effect) ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let hoveredMesh = null;
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Sync Scroll
+            updateCameraScroll();
+
+            // 2. Hover Logic
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cards);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0].object;
+                
+                if (hoveredMesh && hoveredMesh !== hit) {
+                    // Reset previous
+                    hoveredMesh.rotation.set(0,0,0);
+                    hoveredMesh.position.z = 0;
+                }
+                
+                hoveredMesh = hit;
+                
+                // Pop effect
+                hoveredMesh.rotation.x = -mouse.y * 0.2;
+                hoveredMesh.rotation.y = mouse.x * 0.2;
+                hoveredMesh.position.z = 5; // Move forward
+            } else {
+                if (hoveredMesh) {
+                    hoveredMesh.rotation.set(0,0,0);
+                    hoveredMesh.position.z = 0;
+                    hoveredMesh = null;
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- RESIZE ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>
